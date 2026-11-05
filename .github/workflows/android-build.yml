@@ -78,9 +78,6 @@ jobs:
             "s/com.android.tools.build:gradle:8.2.1/com.android.tools.build:gradle:8.6.1/" \
             build.gradle
 
-          echo "Zaktualizowana konfiguracja:"
-          grep -E "compileSdkVersion|targetSdkVersion|com.android.tools.build" build.gradle
-
       - name: Install dependencies
         run: |
           cd "$PROJECT_DIR"
@@ -105,6 +102,32 @@ jobs:
         run: |
           cd "$PROJECT_DIR"
           npx cap sync android
+
+      - name: Add AndroidX dependencies
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          p = Path(os.environ["PROJECT_DIR"]) / "android/app/build.gradle"
+          s = p.read_text()
+
+          needle = "    implementation project(':capacitor-android')"
+
+          dependencies = """
+              implementation "androidx.appcompat:appcompat:${rootProject.ext.androidxAppCompatVersion}"
+              implementation "androidx.core:core:${rootProject.ext.androidxCoreVersion}"
+              implementation "androidx.coordinatorlayout:coordinatorlayout:${rootProject.ext.androidxCoordinatorLayoutVersion}"
+          """
+
+          if "androidx.appcompat:appcompat" not in s:
+              if needle not in s:
+                  raise SystemExit("Nie znaleziono miejsca do dodania zależności")
+              s = s.replace(needle, needle + "\n" + dependencies)
+
+          p.write_text(s)
+          print("Dodano zależności AndroidX")
+          PY
 
       - name: Build debug APK
         run: |
