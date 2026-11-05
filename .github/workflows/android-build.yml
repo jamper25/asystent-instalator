@@ -23,11 +23,14 @@ jobs:
       - name: Extract application project
         run: |
           unzip -q asystent_instalatora_android_ci.zip -d app-src
+
           PROJECT_DIR="$(dirname "$(find app-src -name package.json -not -path '*/node_modules/*' -print -quit)")"
-          if [ -z "$PROJECT_DIR" ] || [ "$PROJECT_DIR" = "app-src" ]; then
-            echo "Nie znaleziono katalogu projektu z package.json"
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "Nie znaleziono package.json"
             exit 1
           fi
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Projekt: $PROJECT_DIR"
 
@@ -42,10 +45,10 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.2.1'
+          gradle-version: '8.7'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -56,12 +59,27 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses
 
-      - name: Install Android SDK packages
+      - name: Install Android SDK 35
         run: |
           sdkmanager \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
             "platform-tools"
+
+      - name: Update Android build configuration
+        run: |
+          cd "$PROJECT_DIR/android"
+
+          sed -i \
+            "s/compileSdkVersion = 34/compileSdkVersion = 35/" \
+            build.gradle
+
+          sed -i \
+            "s/com.android.tools.build:gradle:8.2.1/com.android.tools.build:gradle:8.6.1/" \
+            build.gradle
+
+          echo "Zaktualizowana konfiguracja:"
+          grep -E "compileSdkVersion|targetSdkVersion|com.android.tools.build" build.gradle
 
       - name: Install dependencies
         run: |
@@ -100,4 +118,3 @@ jobs:
           path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
-
