@@ -3,7 +3,9 @@ name: Build Asystent Instalatora APK
 
 on:
   push:
-    branches: [main]
+    paths:
+      - 'asystent_instalatora_android_ci.zip'
+      - '.github/workflows/android-build.yml'
   workflow_dispatch:
 
 permissions:
@@ -12,62 +14,64 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Java 17
+      - name: Extract application project
+        run: |
+          test -f asystent_instalatora_android_ci.zip
+          unzip -q asystent_instalatora_android_ci.zip
+          test -f asystent_instalatora_rebuild/package.json
+
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Gradle
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.2.1'
 
-      - name: Android SDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-    - - name: Accept Android SDK licenses
+      - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses
 
-      - name: Install Android components
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
-
-      - name: Unpack application
+      - name: Install Android SDK packages
         run: |
-          mkdir app-src
-          unzip -q asystent_instalatora_android_ci.zip -d app-src
-          PROJECT_DIR=$(find app-src -name package.json -print -quit | xargs dirname)
-          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          sdkmanager "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "platform-tools"
 
-      - name: Install dependencies
-        working-directory: .
+      - name: Install dependencies and run tests
+        working-directory: asystent_instalatora_rebuild
         run: |
-          cd "$PROJECT_DIR"
-          npm install
+          npm install --no-audit --no-fund
+          npm test
 
-      - name: Sync Capacitor
-        run: |
-          cd "$PROJECT_DIR"
-          npx cap sync android
+      - name: Synchronize Capacitor
+        working-directory: asystent_instalatora_rebuild
+        run: npx cap sync android
 
-      - name: Build APK
-        run: |
-          cd "$PROJECT_DIR/android"
-          gradle assembleDebug
+      - name: Build debug APK
+        working-directory: asystent_instalatora_rebuild/android
+        run: gradle --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: asystent-instalatora-debug-apk
-          path: app-src/**/android/app/build/outputs/apk/debug/app-debug.apk
+          path: asystent_instalatora_rebuild/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 14
