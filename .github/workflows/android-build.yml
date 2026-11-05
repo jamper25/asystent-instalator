@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -22,11 +22,16 @@ jobs:
 
       - name: Extract application project
         run: |
-          test -f asystent_instalatora_android_ci.zip
-          unzip -q asystent_instalatora_android_ci.zip
-          test -f asystent_instalatora_rebuild/package.json
+          unzip -q asystent_instalatora_android_ci.zip -d app-src
+          PROJECT_DIR="$(dirname "$(find app-src -name package.json -not -path '*/node_modules/*' -print -quit)")"
+          if [ -z "$PROJECT_DIR" ] || [ "$PROJECT_DIR" = "app-src" ]; then
+            echo "Nie znaleziono katalogu projektu z package.json"
+            exit 1
+          fi
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Projekt: $PROJECT_DIR"
 
-      - name: Set up Java
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -44,34 +49,55 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          accept-android-sdk-licenses: true
 
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses
 
       - name: Install Android SDK packages
         run: |
-          sdkmanager "platforms;android-34" \
+          sdkmanager \
+            "platforms;android-34" \
             "build-tools;34.0.0" \
             "platform-tools"
 
-      - name: Install dependencies and run tests
-        working-directory: asystent_instalatora_rebuild
+      - name: Install dependencies
         run: |
+          cd "$PROJECT_DIR"
           npm install --no-audit --no-fund
-          npm test
+
+      - name: Check JavaScript syntax
+        run: |
+          cd "$PROJECT_DIR"
+          node tools/check-syntax.js
+
+      - name: Check project integrity
+        run: |
+          cd "$PROJECT_DIR"
+          node tools/check-project-integrity.js
+
+      - name: Test Buderus catalog
+        run: |
+          cd "$PROJECT_DIR"
+          node tests/buderus_catalog.test.js
 
       - name: Synchronize Capacitor
-        working-directory: asystent_instalatora_rebuild
-        run: npx cap sync android
+        run: |
+          cd "$PROJECT_DIR"
+          npx cap sync android
 
       - name: Build debug APK
-        working-directory: asystent_instalatora_rebuild/android
-        run: gradle --no-daemon assembleDebug
+        run: |
+          cd "$PROJECT_DIR/android"
+          gradle --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: asystent-instalatora-debug-apk
-          path: asystent_instalatora_rebuild/android/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
