@@ -312,6 +312,39 @@ jobs:
           cd "$PROJECT_DIR/android"
           gradle --no-daemon assembleDebug
 
+      - name: Verify final APK contains unlocked assets
+        run: |
+          python3 - <<'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+
+          root = Path(os.environ["PROJECT_DIR"])
+          apk = root / "android/app/build/outputs/apk/debug/app-debug.apk"
+          if not apk.is_file():
+              raise SystemExit("Nie znaleziono wynikowego APK")
+
+          with zipfile.ZipFile(apk) as z:
+              ui = z.read("assets/public/js/ui.js").decode("utf-8")
+              pro = z.read("assets/public/js/pro.js").decode("utf-8")
+
+          order = [ui.find("{ k: '%s'" % k) for k in ("offers", "ai", "calc", "settings")]
+          if any(x < 0 for x in order) or order != sorted(order):
+              raise SystemExit("W gotowym APK kolejność zakładek jest nieprawidłowa: " + repr(order))
+
+          for marker in (
+              "function proMa() { return true; }",
+              "function proPlatny(id) { return false; }",
+              "function proPodglad(id) { return false; }",
+              "function proDoPlatnego(t) { return false; }",
+              "function proEkranPodgladu() {\\n  return false;"
+          ):
+              if marker not in pro:
+                  raise SystemExit("Gotowy APK nie zawiera wymaganej poprawki: " + marker)
+
+          print("GOTOWY APK ZWERYFIKOWANY: prawidłowa nawigacja i wyłączone blokady abonamentowe.")
+          PY
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
