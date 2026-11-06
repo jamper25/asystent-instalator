@@ -282,7 +282,8 @@ jobs:
           import os
           from pathlib import Path
 
-          root = Path(os.environ["PROJECT_DIR"])
+          # Ten krok działa już wewnątrz PROJECT_DIR (cd wykonano wyżej).
+          root = Path(".")
           base = root / "android/app/src/main/assets/public/js"
           ui = (base / "ui.js").read_text()
           pro = (base / "pro.js").read_text()
