@@ -395,7 +395,8 @@ jobs:
           assert.throws(() => context.salesAddDelivery(sale, 0, 0), /większą od zera/);
           console.log('OK: dostawy częściowe i kontrola ilości.');
           EOF
-          node "$PROJECT_DIR/tests/sales_delivery.test.js"
+          cd "$PROJECT_DIR"
+          node tests/sales_delivery.test.js
 
       - name: Copy patched web assets into Android package and verify
         run: |
