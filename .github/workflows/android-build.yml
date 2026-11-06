@@ -203,6 +203,77 @@ jobs:
           print("OK: Biuro → Asystent → Kalkulatory → Ustawienia; tworzenie schematu kotłowni bez abonamentu.")
           PY
 
+      - name: Remove all remaining feature and subscription locks
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          p = Path(os.environ["PROJECT_DIR"]) / "www/js/pro.js"
+          s = p.read_text()
+
+          replacements = {
+              "function proMa() { return !!state.pro.aktywny; }":
+                  "function proMa() { return true; }",
+              "function proPlatny(id) { return PRO_KALK.indexOf(id) !== -1; }":
+                  "function proPlatny(id) { return false; }",
+              "function proPodglad(id) { return proPlatny(id) && !proMa(); }":
+                  "function proPodglad(id) { return false; }",
+              "function proEkranPodgladu() {":
+                  "function proEkranPodgladu() {\n  return false; // Wszystkie funkcje aplikacji są odblokowane.",
+              "function proDoPlatnego(t) {":
+                  "function proDoPlatnego(t) { return false; // Brak blokad przejść między modułami.\n  /*",
+          }
+
+          for old, new in replacements.items():
+              if old not in s:
+                  if new not in s:
+                      raise SystemExit("Nie znaleziono oczekiwanego punktu blokady: " + old)
+              else:
+                  s = s.replace(old, new, 1)
+
+          # Usuń pozostałą część starej funkcji proDoPlatnego z parsowania,
+          # pozostawiając ją jako nieaktywny komentarz aż do jej zamykającej klamry.
+          marker = "function proDoPlatnego(t) { return false; // Brak blokad przejść między modułami.\n  /*"
+          if marker in s:
+              start = s.index(marker)
+              end_marker = "\ndocument.addEventListener('click', e => {\n  if (proMa() || !proDoPlatnego(e.target)) return;"
+              end = s.find(end_marker, start)
+              if end < 0:
+                  raise SystemExit("Nie udało się odseparować starej blokady przejść")
+              s = s[:start] + "function proDoPlatnego(t) { return false; }\n" + s[end:]
+
+          # Nie pokazuj abonamentu ani przycisków zakupu w Ustawieniach.
+          start_marker = "/* ---------- abonament w Ustawieniach ----------"
+          end_marker = "/* ---------- drzwi z darmowej części do płatnej ----------"
+          if start_marker in s and end_marker in s:
+              a = s.index(start_marker)
+              b = s.index(end_marker, a)
+              s = s[:a] + "/* Abonament wyłączony — aplikacja działa w pełnym zakresie bez zakupów. */\n" + s[b:]
+          else:
+              raise SystemExit("Nie znaleziono sekcji abonamentu w Ustawieniach")
+
+          # Usuń historyczny przykładowy projekt demonstracyjny; nie może
+          # być mylony z projektem użytkownika po odblokowaniu tworzenia.
+          s = s.replace(
+              "function proUstawPrzyklad() {\n  const i = state.projekty.findIndex(x => x.przyklad);\n  if (!proMa()) { if (i < 0) state.projekty.unshift(proProjekt()); }\n  else if (i >= 0) {",
+              "function proUstawPrzyklad() {\n  const i = state.projekty.findIndex(x => x.przyklad);\n  if (i >= 0) {"
+          )
+
+          checks = [
+              "function proMa() { return true; }",
+              "function proPlatny(id) { return false; }",
+              "function proPodglad(id) { return false; }",
+              "function proDoPlatnego(t) { return false; }",
+              "function proEkranPodgladu() {\n  return false;"
+          ]
+          for c in checks:
+              if c not in s:
+                  raise SystemExit("Kontrola odblokowania nie przeszła: " + c)
+          p.write_text(s)
+          print("OK: usunięto blokady kalkulatorów, edycji Biura, projektów i przejść między modułami; ukryto zakup abonamentu.")
+          PY
+
       - name: Build debug APK
         run: |
           cd "$PROJECT_DIR/android"
