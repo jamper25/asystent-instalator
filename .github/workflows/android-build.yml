@@ -129,6 +129,34 @@ jobs:
           print("Dodano zależności AndroidX")
           PY
 
+      - name: Fix AppCompat launch theme and verify Android entry point
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["PROJECT_DIR"])
+          styles = root / "android/app/src/main/res/values/styles.xml"
+          manifest = root / "android/app/src/main/AndroidManifest.xml"
+
+          if not styles.exists() or not manifest.exists():
+              raise SystemExit("Brak styles.xml lub AndroidManifest.xml")
+
+          content = styles.read_text()
+          content = content.replace(
+              'parent="android:style/Theme.Material.Light.NoActionBar"',
+              'parent="Theme.AppCompat.Light.NoActionBar"'
+          )
+          if 'parent="Theme.AppCompat.Light.NoActionBar"' not in content:
+              raise SystemExit("Nie udało się ustawić motywu AppCompat")
+          styles.write_text(content)
+
+          xml = manifest.read_text()
+          if 'android:theme="@style/AppTheme.NoActionBar"' not in xml:
+              raise SystemExit("MainActivity nie wskazuje AppTheme.NoActionBar")
+          print("Motyw AppCompat ustawiony i zweryfikowany.")
+          PY
+
       - name: Build debug APK
         run: |
           cd "$PROJECT_DIR/android"
