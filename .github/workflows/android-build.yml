@@ -274,6 +274,129 @@ jobs:
           print("OK: usunięto blokady kalkulatorów, edycji Biura, projektów i przejść między modułami; ukryto zakup abonamentu.")
           PY
 
+      - name: Add partial delivery tracking to sales register
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["PROJECT_DIR"])
+          p = root / "www/js/ui_offers.js"
+          s = p.read_text()
+
+          needle = """function salesRemaining(sale) {
+            return Math.max(0, (Number(sale && sale.gross) || 0) - salesPaidTotal(sale));
+          }
+          """
+          helpers = needle + """function salesDeliveredForLine(sale, lineIndex) {
+            const events = Array.isArray(sale && sale.deliveries) ? sale.deliveries : [];
+            return events.filter(x => Number(x.lineIndex) === Number(lineIndex))
+              .reduce((sum, x) => sum + (Number(x.qty) || 0), 0);
+          }
+          function salesLineRemaining(sale, lineIndex) {
+            const line = Array.isArray(sale && sale.lines) ? sale.lines[lineIndex] : null;
+            return Math.max(0, (Number(line && line.qty) || 0) - salesDeliveredForLine(sale, lineIndex));
+          }
+          function salesDeliveryProgress(sale) {
+            const lines = Array.isArray(sale && sale.lines) ? sale.lines : [];
+            if (!lines.length) return null;
+            const required = lines.reduce((sum, line) => sum + Math.max(0, Number(line.qty) || 0), 0);
+            const delivered = lines.reduce((sum, line, i) => sum + salesDeliveredForLine(sale, i), 0);
+            return { required, delivered, remaining: Math.max(0, required - delivered), complete: required > 0 && delivered >= required };
+          }
+          function salesAddDelivery(sale, lineIndex, qty, date, note) {
+            if (!sale || !Array.isArray(sale.lines) || !Number.isInteger(lineIndex) || !sale.lines[lineIndex]) throw new Error('Wybierz prawidłową pozycję dostawy.');
+            const amount = Number(qty);
+            if (!Number.isFinite(amount) || amount <= 0) throw new Error('Podaj ilość dostawy większą od zera.');
+            const remaining = salesLineRemaining(sale, lineIndex);
+            if (amount > remaining + 0.000001) throw new Error('Ilość przekracza pozostałą dostawę: ' + remaining + '.');
+            sale.deliveries = Array.isArray(sale.deliveries) ? sale.deliveries : [];
+            sale.deliveries.push({ id: 'delivery_' + Date.now() + '_' + Math.random().toString(36).slice(2,7), lineIndex, qty: amount,
+              date: String(date || new Date().toISOString().slice(0,10)), note: String(note || '').trim().slice(0,160), createdAt: new Date().toISOString() });
+            const progress = salesDeliveryProgress(sale);
+            sale.delivery = progress.complete ? 'Dostarczone' : 'Częściowo dostarczone';
+            sale.updatedAt = new Date().toISOString();
+            return progress;
+          }
+          """
+          if "function salesAddDelivery(sale, lineIndex, qty, date, note)" not in s:
+              if needle not in s:
+                  raise SystemExit("Nie znaleziono miejsca na funkcje dostaw częściowych")
+              s = s.replace(needle, helpers, 1)
+
+          old_ui = """        ${x.lines && x.lines.length ? `<small>Pozycje: ${x.lines.map(l=>esc(l.name)+' × '+Number(l.qty||0)).join(' · ')}</small>` : ''}
+                  ${x.lines && x.lines.length && !x.stockIssued ? `<div class="sales-actions"><button class="btn2" data-salesissue="${esc(x.id)}">Wydaj z magazynu</button></div>` : ''}
+          """
+          new_ui = """        ${x.lines && x.lines.length ? `<small>Pozycje: ${x.lines.map(l=>esc(l.name)+' × '+Number(l.qty||0)).join(' · ')}</small>` : ''}
+                  ${x.lines && x.lines.length ? (() => { const d=salesDeliveryProgress(x); return `<div class="payment-history"><strong>Realizacja dostaw: ${d.delivered} / ${d.required} szt.</strong>${x.lines.map((l,i)=>`<small>${esc(l.name)} — dostarczono: ${salesDeliveredForLine(x,i)} / ${Number(l.qty)||0} ${esc(l.unit||'szt.')} · pozostało ${salesLineRemaining(x,i)}</small>`).join('')}${d.complete?'<small class="ok-txt">Wszystkie pozycje dostarczone</small>':''}${(x.deliveries||[]).length?`<small>Historia dostaw:</small>${x.deliveries.map(ev=>`<small>${ev.date?plDate(ev.date):'—'} · ${esc(x.lines[ev.lineIndex]?.name||'Pozycja')} × ${Number(ev.qty)||0}${ev.note?' · '+esc(ev.note):''}</small>`).join('')}`:''}</div>`; })() : ''}
+                  ${x.lines && x.lines.length && salesDeliveryProgress(x).remaining > 0 ? `<div class="sales-actions"><select data-salesdeliveryline="${esc(x.id)}">${x.lines.map((l,i)=>`<option value="${i}" ${salesLineRemaining(x,i)<=0?'disabled':''}>${esc(l.name)} — pozostało ${salesLineRemaining(x,i)}</option>`).join('')}</select><input type="number" min="0.01" step="0.01" placeholder="Ilość" data-salesdeliveryqty="${esc(x.id)}" style="max-width:95px"><input type="date" data-salesdeliverydate="${esc(x.id)}" value="${new Date().toISOString().slice(0,10)}" style="max-width:145px"><input type="text" placeholder="Nr WZ / uwagi" data-salesdeliverynote="${esc(x.id)}" style="max-width:130px"><button class="btn2" data-salesdelivery="${esc(x.id)}">Zapisz dostawę</button></div>` : ''}
+                  ${x.lines && x.lines.length && !x.stockIssued ? `<div class="sales-actions"><button class="btn2" data-salesissue="${esc(x.id)}">Wydaj z magazynu</button></div>` : ''}
+          """
+          if "data-salesdeliveryline" not in s:
+              if old_ui not in s:
+                  raise SystemExit("Nie znaleziono miejsca na panel dostaw w karcie sprzedaży")
+              s = s.replace(old_ui, new_ui, 1)
+
+          event_anchor = "  const salesIssue = e.target.closest('[data-salesissue]');"
+          event_code = """  const salesDelivery = e.target.closest('[data-salesdelivery]');
+            if (salesDelivery) {
+              const id = salesDelivery.dataset.salesdelivery;
+              const sale = state.salesRecords.find(x => x.id === id);
+              const lineEl = document.querySelector(`[data-salesdeliveryline="${id}"]`);
+              const qtyEl = document.querySelector(`[data-salesdeliveryqty="${id}"]`);
+              const dateEl = document.querySelector(`[data-salesdeliverydate="${id}"]`);
+              const noteEl = document.querySelector(`[data-salesdeliverynote="${id}"]`);
+              try {
+                const progress = salesAddDelivery(sale, Number(lineEl && lineEl.value), Number(qtyEl && qtyEl.value), dateEl && dateEl.value, noteEl && noteEl.value);
+                saveSalesRecords(); render(true);
+                toast(progress.complete ? 'Zarejestrowano ostatnią dostawę. Zamówienie zrealizowane.' : 'Zapisano dostawę częściową.');
+              } catch (err) { toast(err && err.message ? err.message : 'Nie udało się zapisać dostawy.'); }
+              return;
+            }
+          """
+          if "const salesDelivery = e.target.closest('[data-salesdelivery]')" not in s:
+              if event_anchor not in s:
+                  raise SystemExit("Nie znaleziono obsługi zdarzeń sprzedaży")
+              s = s.replace(event_anchor, event_code + event_anchor, 1)
+
+          old_save = "dueDate:val('dueDate'),delivery:val('delivery'),document:val('document'),documentNo:val('documentNo'),notes:val('notes'),"
+          new_save = "dueDate:val('dueDate'),delivery:(previous.lines&&previous.lines.length&&previous.deliveries&&previous.deliveries.length?(salesDeliveryProgress(previous).complete?'Dostarczone':'Częściowo dostarczone'):val('delivery')),document:val('document'),documentNo:val('documentNo'),notes:val('notes'),"
+          if old_save in s: s = s.replace(old_save, new_save, 1)
+
+          old_header = "const header=['Data sprzedaży','Klient','Adres inwestycji','Towar / urządzenie','Brutto','Przychód netto','Koszt materiałów netto','Koszt robocizny netto','Szacowana marża netto','Kompletność marży','Zapłacono','Pozostało','Termin płatności','Dostawa','Dokument','Numer dokumentu'];"
+          new_header = "const header=['Data sprzedaży','Klient','Adres inwestycji','Towar / urządzenie','Brutto','Przychód netto','Koszt materiałów netto','Koszt robocizny netto','Szacowana marża netto','Kompletność marży','Zapłacono','Pozostało','Termin płatności','Status dostawy','Historia dostaw','Dokument','Numer dokumentu'];"
+          if old_header in s: s = s.replace(old_header, new_header, 1)
+          old_row = "return [x.saleDate,x.client,x.site,x.items,x.gross,x.revenueNet,c.materialCost,c.laborCost,c.complete?c.margin:'',c.complete?'Kompletne':'Niepełne',salesPaidTotal(x),salesRemaining(x),x.dueDate,x.delivery,x.document,x.documentNo].map(quote).join(';');"
+          new_row = """const deliveryLog=(x.deliveries||[]).map(ev=>`${ev.date||''}: ${x.lines&&x.lines[ev.lineIndex]?x.lines[ev.lineIndex].name:'pozycja'} x ${ev.qty}${ev.note?' ('+ev.note+')':''}`).join(' | ');
+                return [x.saleDate,x.client,x.site,x.items,x.gross,x.revenueNet,c.materialCost,c.laborCost,c.complete?c.margin:'',c.complete?'Kompletne':'Niepełne',salesPaidTotal(x),salesRemaining(x),x.dueDate,x.delivery,deliveryLog,x.document,x.documentNo].map(quote).join(';');"""
+          if old_row in s: s = s.replace(old_row, new_row, 1)
+
+          p.write_text(s)
+          print("Dodano ewidencję dostaw częściowych do rejestru sprzedaży.")
+          PY
+          cat > "$PROJECT_DIR/tests/sales_delivery.test.js" <<'EOF'
+          const fs = require('fs'), vm = require('vm'), assert = require('assert');
+          const source = fs.readFileSync('www/js/ui_offers.js', 'utf8');
+          const start = source.indexOf('function salesDeliveredForLine(');
+          const end = source.indexOf('function salesCostSummary(', start);
+          assert(start >= 0 && end > start, 'Brak funkcji dostaw');
+          const context = { Date, Math, Number, String, Array, Object, Error };
+          vm.createContext(context); vm.runInContext(source.slice(start, end), context);
+          const sale = { lines: [{name:'Kocioł',qty:2},{name:'Zasobnik',qty:1}] };
+          let progress = context.salesAddDelivery(sale, 0, 1, '2026-11-06', 'WZ 1');
+          assert.strictEqual(progress.delivered, 1);
+          assert.strictEqual(progress.remaining, 2);
+          assert.strictEqual(sale.delivery, 'Częściowo dostarczone');
+          context.salesAddDelivery(sale, 1, 1, '2026-11-07', 'WZ 2');
+          progress = context.salesAddDelivery(sale, 0, 1, '2026-11-08', 'WZ 3');
+          assert.strictEqual(progress.complete, true);
+          assert.strictEqual(sale.delivery, 'Dostarczone');
+          assert.throws(() => context.salesAddDelivery(sale, 0, 0.1), /przekracza pozostałą dostawę/);
+          assert.throws(() => context.salesAddDelivery(sale, 0, 0), /większą od zera/);
+          console.log('OK: dostawy częściowe i kontrola ilości.');
+          EOF
+          node "$PROJECT_DIR/tests/sales_delivery.test.js"
+
       - name: Copy patched web assets into Android package and verify
         run: |
           cd "$PROJECT_DIR"
