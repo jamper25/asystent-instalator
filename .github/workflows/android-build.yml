@@ -157,6 +157,52 @@ jobs:
           print("Motyw AppCompat ustawiony i zweryfikowany.")
           PY
 
+      - name: Apply requested navigation and schematic access changes
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["PROJECT_DIR"])
+          ui = root / "www/js/ui.js"
+          pro = root / "www/js/pro.js"
+
+          s = ui.read_text()
+          old = """const NAV = [
+            { k: 'calc', label: 'Kalkulatory', icon: 'calc' },
+            { k: 'offers', label: 'Biuro', icon: 'doc' },
+            { k: 'ai', label: 'Asystent', icon: 'spark' },
+            { k: 'settings', label: 'Ustawienia', icon: 'gear' },
+          ];"""
+          new = """const NAV = [
+            { k: 'offers', label: 'Biuro', icon: 'doc' },
+            { k: 'ai', label: 'Asystent', icon: 'spark' },
+            { k: 'calc', label: 'Kalkulatory', icon: 'calc' },
+            { k: 'settings', label: 'Ustawienia', icon: 'gear' },
+          ];"""
+          if old in s:
+              s = s.replace(old, new)
+          elif new not in s:
+              raise SystemExit("Nie rozpoznano dotychczasowej nawigacji")
+          ui.write_text(s)
+
+          s = pro.read_text()
+          old = "const PRO_KALK = ['co_dia', 'rozdz_dia', 'woda_dia', 'gas', 'kotlownia'];"
+          new = "// Schemat kotłowni pozostaje dostępny bez abonamentu — podstawowe narzędzie projektowe.\nconst PRO_KALK = ['co_dia', 'rozdz_dia', 'woda_dia', 'gas'];"
+          if old in s:
+              s = s.replace(old, new)
+          elif new not in s:
+              raise SystemExit("Nie rozpoznano listy kalkulatorów premium")
+          pro.write_text(s)
+
+          nav = ui.read_text()
+          if not (nav.index("{ k: 'offers'") < nav.index("{ k: 'ai'") < nav.index("{ k: 'calc'") < nav.index("{ k: 'settings'")):
+              raise SystemExit("Kolejność zakładek nieprawidłowa")
+          if "const PRO_KALK = ['co_dia', 'rozdz_dia', 'woda_dia', 'gas'];" not in pro.read_text():
+              raise SystemExit("Schemat kotłowni nadal objęty blokadą")
+          print("OK: Biuro → Asystent → Kalkulatory → Ustawienia; tworzenie schematu kotłowni bez abonamentu.")
+          PY
+
       - name: Build debug APK
         run: |
           cd "$PROJECT_DIR/android"
