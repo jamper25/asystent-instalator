@@ -343,7 +343,7 @@ jobs:
                   raise SystemExit("Gotowy APK nie zawiera wymaganej poprawki: " + marker)
 
           import re
-          if not re.search(r"function\\s+proEkranPodgladu\\s*\\(\\s*\\)\\s*\\{\\s*return\\s+false\\s*;", pro):
+          if not re.search(r"function\s+proEkranPodgladu\s*\(\s*\)\s*\{\s*return\s+false\s*;", pro):
               raise SystemExit("Gotowy APK nadal blokuje ekran edycji")
 
           print("GOTOWY APK ZWERYFIKOWANY: prawidłowa nawigacja i wyłączone blokady abonamentowe.")
