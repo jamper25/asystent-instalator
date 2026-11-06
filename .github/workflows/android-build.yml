@@ -274,6 +274,39 @@ jobs:
           print("OK: usunięto blokady kalkulatorów, edycji Biura, projektów i przejść między modułami; ukryto zakup abonamentu.")
           PY
 
+      - name: Copy patched web assets into Android package and verify
+        run: |
+          cd "$PROJECT_DIR"
+          npx cap copy android
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["PROJECT_DIR"])
+          base = root / "android/app/src/main/assets/public/js"
+          ui = (base / "ui.js").read_text()
+          pro = (base / "pro.js").read_text()
+
+          order = [ui.find("{ k: '%s'" % k) for k in ("offers", "ai", "calc", "settings")]
+          if any(x < 0 for x in order) or order != sorted(order):
+              raise SystemExit("APK assets nadal mają błędną kolejność zakładek: " + repr(order))
+
+          required = [
+              "function proMa() { return true; }",
+              "function proPlatny(id) { return false; }",
+              "function proPodglad(id) { return false; }",
+              "function proDoPlatnego(t) { return false; }",
+          ]
+          for marker in required:
+              if marker not in pro:
+                  raise SystemExit("APK assets nie zawierają odblokowania: " + marker)
+
+          if "function proEkranPodgladu() {\n  return false;" not in pro:
+              raise SystemExit("APK assets nadal blokują ekran edycji")
+
+          print("WERYFIKACJA APK ASSETS OK: Biuro → Asystent → Kalkulatory → Ustawienia; wszystkie blokady PRO wyłączone.")
+          PY
+
       - name: Build debug APK
         run: |
           cd "$PROJECT_DIR/android"
