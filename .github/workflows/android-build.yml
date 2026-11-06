@@ -338,10 +338,13 @@ jobs:
               "function proPlatny(id) { return false; }",
               "function proPodglad(id) { return false; }",
               "function proDoPlatnego(t) { return false; }",
-              "function proEkranPodgladu() {\\n  return false;"
           ):
               if marker not in pro:
                   raise SystemExit("Gotowy APK nie zawiera wymaganej poprawki: " + marker)
+
+          import re
+          if not re.search(r"function\\s+proEkranPodgladu\\s*\\(\\s*\\)\\s*\\{\\s*return\\s+false\\s*;", pro):
+              raise SystemExit("Gotowy APK nadal blokuje ekran edycji")
 
           print("GOTOWY APK ZWERYFIKOWANY: prawidłowa nawigacja i wyłączone blokady abonamentowe.")
           PY
